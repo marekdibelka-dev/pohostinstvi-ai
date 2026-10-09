@@ -12,7 +12,6 @@ class Tests(unittest.TestCase):
         self.env = patch.dict(os.environ, {
             'SLACK_SIGNING_SECRET': 'test-secret',
             'SLACK_CHANNEL_ID': 'C0C8Q0TDF0Q',
-            'SLACK_ALLOWED_USER_IDS': 'U0C7PBSEDBM',
             'SLACK_BOT_TOKEN': 'xoxb-test',
         })
         self.env.start()

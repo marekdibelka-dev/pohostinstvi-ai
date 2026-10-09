@@ -36,32 +36,59 @@ def verify_signature(body: bytes, headers: dict, secret: str, now=None) -> bool:
 
 
 def parse_change(text: str):
-    # Explicit syntax only: do not guess destructive actions from ambiguous messages.
-    text = re.sub(r"\s+", " ", text.strip())
-    pattern = (
-        r"^do(?:š|s)el(?:a|o)?\s+(?P<old>[^,;]+)\s*[,;]\s*"
-        r"nara(?:z|ž)il(?:i|a)?(?:\s+(?:jsem|jsme))?\s+(?P<new>.+?)"
-        r"(?:\s*[,;]\s*cena\s*(?P<price>\d{1,4})(?:\s*k(?:č|c))?)?\s*\.?$"
-    )
-    match = re.match(pattern, text, flags=re.IGNORECASE)
-    if not match:
+    """Conservative Czech natural-language patterns; never invent missing names.
+
+    This is NOT an LLM. Ambiguous phrasing must be clarified before any future write.
+    """
+    text = re.sub(r"\s+", " ", text.strip()).strip(" .!?")
+    if not text or len(text) > 500:
         return None
-    old = match.group("old").strip(" .")
-    new = match.group("new").strip(" .")
-    if not old or not new or old.casefold() == new.casefold():
-        return None
-    price = match.group("price")
-    if price is None:
-        return {"old": old, "new": new, "price": None}
-    value = int(price)
-    if value <= 0 or value > 1000:
-        return None
-    return {"old": old, "new": new, "price": value}
+
+    # Price must be explicit. Remove it before recognizing product names.
+    price_matches = list(re.finditer(
+        r"(?:[,;]\s*)?(?:cena(?:\s+je)?\s*[:=]?\s*|za\s+)(\d{1,4})\s*(?:kč|kc|,-)?(?=$|[,;.!?]\s*$)",
+        text, flags=re.IGNORECASE))
+    price = None
+    if not price_matches:
+        price_matches = list(re.finditer(r"[,;]\s*(\d{1,4})\s*(?:kč|kc|,-)?(?=$|[,;.!?]\s*$)", text, flags=re.IGNORECASE))
+    if price_matches:
+        match = price_matches[-1]
+        price = int(match.group(1))
+        if not 1 <= price <= 1000:
+            return None
+        text = (text[:match.start()] + text[match.end():]).strip(" ,;.!?")
+
+    # Phrases that unambiguously identify both the old and new beer.
+    patterns = [
+        r"^do(?:š|s)el(?:a|o)?\s+(?P<old>.+?)\s*[,;]\s*nara(?:z|ž)il(?:i|a)?(?:\s+(?:jsem|jsme))?\s+(?P<new>.+)$",
+        r"^do(?:š|s)el(?:a|o)?\s+(?P<old>.+?)\s*[,;]\s*(?:dej|dáme|dame|máme|mame|teď|ted)\s+(?:tam\s+|místo\s+něj\s+|misto\s+nej\s+)?(?P<new>.+)$",
+        r"^(?:vyměň|vymen|vyměňte|vymenit|nahraď|nahrad|nahradit)\s+(?P<old>.+?)\s+za\s+(?P<new>.+)$",
+        r"^nara(?:z|ž)il(?:i|a)?(?:\s+(?:jsem|jsme))?\s+(?P<new>.+?)\s+místo\s+(?P<old>.+)$",
+        r"^(?P<old>.+?)\s+je\s+(?:prázdn(?:ý|y|á|a)|pryč|vypit(?:ý|y))\s*[,;]\s*místo\s+(?:něj|toho)\s+(?:máme|mame|je|dáme|dame)\s+(?P<new>.+)$",
+    ]
+    for pattern in patterns:
+        m = re.match(pattern, text, flags=re.IGNORECASE)
+        if not m:
+            continue
+        old = m.group("old").strip(" ,;.!?")
+        new = m.group("new").strip(" ,;.!?")
+        if not old or not new or old.casefold() == new.casefold():
+            return None
+        # Avoid treating vague prose as a product name.
+        if len(old) > 90 or len(new) > 90 or any(x in old.casefold() for x in ("nějak", "něco", "jiné pivo")):
+            return None
+        return {"old": old, "new": new, "price": price}
+    return None
+
+
+def is_change_intent(message: str) -> bool:
+    """Avoid replying to unrelated channel chatter."""
+    return bool(re.search(r"\b(došel|dosel|došla|dosla|vyměň|vymen|nahraď|nahrad|narazil|narazili|prázdný|prazdny)\b", message, re.IGNORECASE))
 
 
 def preview_text(change):
     if not change:
-        return ("Příkaz jsem nerozpoznal. Použij například: "
+        return ("Výměnu nedokážu jednoznačně určit. Napiš prosím staré pivo, nové pivo a cenu, například: "
                 "`Došel Ogar Kazbek, narazil jsem Mazák 11°, cena 55 Kč.`\n"
                 "*Zatím pouze test – žádné změny v Dotykačce.*")
     price = f"{change['price']} Kč" if change["price"] is not None else "neuvedena – doplň cenu"
@@ -131,15 +158,16 @@ def handle_event(body: bytes, headers: dict):
     channel = event.get("channel", "")
     user = event.get("user", "")
     allowed_channel = os.getenv("SLACK_CHANNEL_ID", "")
-    allowed_users = {x.strip() for x in os.getenv("SLACK_ALLOWED_USER_IDS", "").split(",") if x.strip()}
-    if not allowed_channel or not allowed_users or channel != allowed_channel or user not in allowed_users:
+    # All human members who can post in this Slack channel may submit a preview.
+    # Slack HMAC authenticates the event; channel access is administered in Slack.
+    if not allowed_channel or channel != allowed_channel or not user:
         return 200, {}
     if event.get("thread_ts"):
         return 200, {}
     message = event.get("text", "")
     if not isinstance(message, str) or len(message) > 2000:
         return 200, {}
-    if not re.match(r"^\s*do(?:š|s)el", message, re.IGNORECASE):
+    if not is_change_intent(message):
         return 200, {}
     event_id = data.get("event_id", "")
     if not event_id or not is_new(event_id):
@@ -153,7 +181,7 @@ def handle_event(body: bytes, headers: dict):
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            self.respond(200, {"status": "ok", "mode": "preview-only", "version": "1.2"})
+            self.respond(200, {"status": "ok", "mode": "preview-only", "version": "1.3"})
         else:
             self.respond(404, {"error": "Not found"})
 
