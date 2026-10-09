@@ -1,5 +1,5 @@
-"""Pohostinství AI – Slack event preview bot, READ/REPLY ONLY.
-No Dotykačka, website or Facebook integration in this release.
+"""Pohostinství AI – Slack beer changes and opt-in Facebook publishing.
+Dotykačka and website remain disconnected.
 """
 import hashlib
 import hmac
@@ -13,6 +13,8 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime, timezone
+import facebook
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("pohostinstvi_ai")
@@ -134,6 +136,50 @@ def is_new(event_id: str) -> bool:
         return True
 
 
+def process_change(channel, thread_ts, event_id, message, received_at):
+    change = parse_change(message)
+    if not change:
+        return slack_reply(channel, thread_ts, preview_text(None))
+    if change['price'] is None:
+        return slack_reply(channel, thread_ts,
+            f"Rozpoznal jsem nové pivo *{change['new']}*, ale chybí cena. "
+            "Doplň ji prosím v nové zprávě s celou výměnou. Nic se nezveřejnilo.")
+    if not facebook.allowed_at(received_at):
+        return slack_reply(channel, thread_ts,
+            "Výměna rozpoznána, ale mimo publikační čas (pá/so 18–21, ne 16–20). "
+            "Příspěvek se nevytvořil ani neodkládá na později.")
+    if not facebook.publishing_configured():
+        return slack_reply(channel, thread_ts,
+            "*Facebook – testovací náhled*\n" + facebook.caption(change) +
+            "\n\nAutomatické zveřejnění není zatím aktivní; chybí Meta přístup nebo nastavení.")
+    db = os.environ['FB_DB_PATH']
+    try:
+        if not facebook.claim_event(event_id, db):
+            return  # Duplicate Slack event: never publish twice.
+        try:
+            # Strict wall-clock cutoff: do not publish after the configured window.
+            if not facebook.allowed_at(datetime.now(timezone.utc)):
+                facebook.complete_event(event_id, db, 'outside_window')
+                return slack_reply(channel, thread_ts,
+                    'Publikační čas mezitím skončil. Facebook příspěvek se nezveřejnil.')
+            post_id = facebook.post_photo(change, os.environ['FB_PAGE_ACCESS_TOKEN'],
+                                           os.environ['FB_PAGE_ID'],
+                                           os.getenv('FB_GRAPH_VERSION', 'v26.0'))
+            facebook.complete_event(event_id, db, 'published', post_id)
+            slack_reply(channel, thread_ts, f"Facebook: zveřejněno nové pivo *{change['new']}* "
+                        f"za {change['price']} Kč. ID: `{post_id}`")
+        except Exception:
+            # A network timeout can occur AFTER Facebook publishes; never retry automatically.
+            log.exception('Facebook publication failed or outcome uncertain')
+            facebook.complete_event(event_id, db, 'uncertain')
+            slack_reply(channel, thread_ts,
+                        "Zveřejnění na Facebooku se nepodařilo potvrdit. "
+                        "Zkontroluj stránku; kvůli riziku duplicity systém automaticky neopakuje požadavek.")
+    except Exception:
+        log.exception('Persistent publication deduplication failed')
+        slack_reply(channel, thread_ts, 'Facebook nezveřejněn: chyba evidence událostí.')
+
+
 def handle_event(body: bytes, headers: dict):
     """Return (HTTP status, JSON-compatible dict or None) for signed Slack event."""
     if len(body) > 65536:
@@ -174,14 +220,20 @@ def handle_event(body: bytes, headers: dict):
         return 200, {}
     thread_ts = event.get("ts", "")
     if thread_ts:
-        threading.Thread(target=slack_reply, args=(channel, thread_ts, preview_text(parse_change(message))), daemon=True).start()
+        try:
+            received_at = datetime.fromtimestamp(float(thread_ts), tz=timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            return 200, {}
+        threading.Thread(target=process_change,
+                         args=(channel, thread_ts, event_id, message, received_at),
+                         daemon=True).start()
     return 200, {}
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            self.respond(200, {"status": "ok", "mode": "preview-only", "version": "1.3"})
+            self.respond(200, {"status": "ok", "mode": "facebook-enabled" if facebook.publishing_configured() else "preview-only", "version": "1.4"})
         else:
             self.respond(404, {"error": "Not found"})
 

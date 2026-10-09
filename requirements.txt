@@ -1,1 +1,1 @@
-# Standard library only; no pip dependencies.
+Pillow>=11,<13

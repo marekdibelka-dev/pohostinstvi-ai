@@ -1,32 +1,34 @@
-# Pohostinství AI – cloudový Slack bot v1.3 (pouze náhled)
+# Pohostinství AI Cloud v1.4 – Facebook
 
-Tato verze přijímá zprávy od **všech lidských účastníků** kanálu určeného `SLACK_CHANNEL_ID`, rozpoznává několik běžných českých formulací a odpovídá návrhem výměny ve vlákně. **Nic nevytváří ani nemaže v Dotykačce, nemění web a nepublikuje na Facebooku.**
+Existing Slack bot continues to accept Czech beer changes from **all members** of the private `#piva-na-cepu` channel.
 
-## Aktualizace již běžící verze v1.2
+## Automatic Facebook posts
 
-1. V GitHub repozitáři `marekdibelka-dev/pohostinstvi-ai` nahraď soubory `app.py`, `README.md`, `.env.example` a přidej `test_v13.py` ze složky v1.3. Ostatní soubory mohou zůstat stejné. V GitHubu klikni **Commit changes**.
-2. Railway by mělo po commitu automaticky nasadit novou verzi. Ověř `https://web-production-7726f.up.railway.app/health`: `version` má být `1.3`, `mode` `preview-only`.
-3. V Railway → Variables ponech `SLACK_CHANNEL_ID`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`. Starou proměnnou `SLACK_ALLOWED_USER_IDS` můžeš smazat; v1.3 ji ignoruje.
-4. Slack bot musí zůstat členem kanálu a Event Subscriptions musí být aktivní.
-5. Vyzkoušej příkaz od **jiného člena** kanálu. Bot má odpovědět ve vlákně.
+- On **Friday and Saturday 18:00–21:00**, **Sunday 16:00–20:00**, `Europe/Prague` time.
+- **Only if a new Slack message reports a complete beer replacement with explicit price**. The old beer is not modified in Dotykačka (API not connected).
+- Posts **one photo with caption**, without human approval, to a **Facebook Page**. No Instagram, no website changes.
+- Outside those hours: **no posting and no queue** (prevents advertising a beer that may have run out before the next opening window).
+- Same Slack event never deliberately posted twice: persistent SQLite ID-based deduplication; uncertain Facebook outcomes require manual check.
+- Current original infographic is a **placeholder template**, not an exact match to past graphics. Supply a sample infographic to adapt it.
 
-## Podporované příklady
+## Before turning on auto-posting
 
-- `Došel Ogar Kazbek, narazil jsem Mazák 11°, cena 55 Kč.`
-- `Došel Kazbek, dej tam Mazák 11 za 55.`
-- `Narazili jsme Mazák místo Ogaru Kazbek. Cena 55 Kč.`
-- `Vyměň Ogar Kazbek za Mazák 11°, 55 Kč.`
-- `Kazbek je prázdný, místo něj máme Mazák jedenáctku za 55.`
+1. Create/configure a Meta developer app with access to the target Page, a Page access token, and permissions `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`. Some accounts require Meta App Review / Advanced Access. The person/token must have content creation access to the Page.
+2. On Railway service **web**, add a **persistent volume** mounted at `/data` and set `FB_DB_PATH=/data/pohostinstvi_ai.sqlite3`.
+3. Set `FB_PAGE_ID` and `FB_PAGE_ACCESS_TOKEN` in **Railway Variables**, not in source code or Slack.
+4. Test with `FB_AUTO_PUBLISH=0` first. The Slack bot responds with a Facebook text preview during eligible windows.
+5. After validating access, Page destination and visual design, set `FB_AUTO_PUBLISH=1` to enable real unattended posting.
+6. Keep `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` unchanged. The bot needs Slack Event Subscriptions `message.groups` and scope `groups:history` for the private channel.
 
-Jde o **pravidlový parser, ne jazykový model**. Neporozumí každé volné formulaci; pokud není příkaz jednoznačný, požádá o upřesnění. Zatím neověřuje skutečné názvy produktů v Dotykačce, takže např. `Ogaru Kazbek` může být potřeba při ostrém napojení rozlišit od `Ogar Kazbek`. Pokud cena chybí, bot ji vyžádá. Před ostrým zápisem do Dotykačky bude nutné bezpečné párování produktů, perzistentní ochrana před duplicitami, audit a otestování zachování historie prodejů.
+## Safeguards / limitations
 
-## Bezpečnost
+- Any human member of the configured Slack channel can trigger publication; **keep it private**.
+- If Facebook request times out, the system **does not retry automatically**: a post may already exist.
+- Messages without a price are never posted. The parser recognizes several common Czech phrasings, not arbitrary language.
+- There is no Dotykačka cross-check. If a member sends incorrect information, it can be published.
+- Avoid deleting or replacing the persistent volume: that would lose deduplication history.
+- The app replies in Slack threads. The endpoint is `/slack/events`, health check `/health`.
 
-- Slack HMAC podpis a pětiminutové časové okno; filtr na jediný kanál.
-- Bot ignoruje vlastní zprávy a odpovědi ve vláknech.
-- **Každý lidský uživatel s možností psát do kanálu může spustit náhled.** Doporučuje se změnit kanál na soukromý a spravovat členství.
-- Žádné přístupy k Dotykačce, webu ani Facebooku.
+## Tests
 
-## Test
-
-`python -m unittest -v test_app.py test_v13.py`
+Run `python -m unittest discover -v`.
