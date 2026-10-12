@@ -12,3 +12,6 @@ Nezávislý AI kontrolor musí vyhodnotit pravopis a úplnost textů, správnou 
 
 ## Režim publikace
 Pouze po výměně piva ve Slacku a jen pátek/sobota 18:00–21:00 a neděle 16:00–20:00 (Europe/Prague). Bez fronty mimo okno. Nezávislá skutečná otevírací doba: pátek/sobota 18:00–22:00; neděle 17:00–21:00. Dokud se nezkontroluje první živý obrázek v2.1, `FB_AUTO_PUBLISH=0`.
+
+## Verze 2.2 – přesná čeština
+Klíčový nadpis „DNES NA ČEPU“ se nyní nikdy negeneruje jako AI text; po vytvoření plakátu jej originálně vysází Pillow fontem podporujícím češtinu na výrazný zeleno-červený malovaný banner. Ve vstupním obrazovém promptu je horní pruh bez textu. Ostatní názvy a ceny nadále AI výtvarně komponuje, ale kontrola musí porovnávat přesné diakritické znaky. Chybně vykreslený název či cena způsobí zastavení publikace. Kontrola využívající počítačové vidění není stoprocentní; před zapnutím plného automatu je nutný test a revize.

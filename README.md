@@ -61,3 +61,6 @@ open('/data/test_mazak_v20.png', 'wb').write(p)
 `AI_DESIGN_MODE=hybrid` ponechává technickou variantu fotografie + programové sazby z předchozích verzí. Automatické přepnutí při chybě **neexistuje** — při selhání je zveřejnění zablokováno.
 
 Lokální testy: `python -m unittest discover -v`.
+
+### Oprava 2.2: DNES NA ČEPU
+Verze 2.1 akceptovala „CEPU“, protože její kontrolní funkce odstraňovala háčky a čárky. Od 2.2 hlavičku přidává Pillow s přesnou češtinou a QA nezaměňuje znaky bez diakritiky. FB_AUTO_PUBLISH ponechejte 0 při testování.
