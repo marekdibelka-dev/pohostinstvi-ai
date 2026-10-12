@@ -1,8 +1,8 @@
-# Pohostinství AI Cloud v1.7 – prémiová AI grafika
+# Pohostinství AI Cloud v1.8 – prémiová AI grafika
 
 ## Oprava náhledu podle MASTER PROMPTU
 
-Soubor `preview/Pohostinstvi_AI_v1_7_nahled.png` ukazuje schválený **filmový reklamní styl** (nejde o starý šablonový náhled). Jde o výtvarnou referenci; samotný generátor produkuje vždy novou AI scénu a skládá do ní správné názvy, ceny a originální logo. V referenčním obrázku mohou být AI doplněné popisné detaily; neslouží jako podklad pro tvrzení o parametrech piva.
+Soubor `preview/Pohostinstvi_AI_v1_8_OPRAVENY_NAHLED.png` ukazuje schválený **filmový reklamní styl** (nejde o starý šablonový náhled). Jde o výtvarnou referenci; samotný generátor produkuje vždy novou AI scénu a skládá do ní správné názvy, ceny a originální logo. V referenčním obrázku mohou být AI doplněné popisné detaily; neslouží jako podklad pro tvrzení o parametrech piva.
 
 ## Změna oproti v1.6
 
@@ -36,3 +36,12 @@ Každá nová zpráva o výměně piva ve Slacku vyvolá **novou AI fotograficko
 ## Testy
 
 `python -m unittest discover -v`
+
+
+## Důležitá oprava v1.8: nečitelné písmo
+
+V1.7 při chybějícím systémovém TTF používala 10px bitmapové písmo, takže skutečná grafika měla téměř neviditelný text. Nová v1.8 instalací systémových balíků `fonts-dejavu-core`, `fonts-dejavu-extra` v `nixpacks.toml` zajistí škálovatelnou typografii. Pokud by instalační obraz fonty přesto postrádal, `compose` selže s jasným chybovým hlášením a nic se automaticky nezveřejní.
+
+Při uploadu GitHub vlož do kořene repozitáře rovněž **nixpacks.toml**, jinak se fonty nenainstalují. Po nasazení je možné bez nákladů zkontrolovat fonty příkazem: `/opt/venv/bin/python -c 'import ai_design; print(ai_design.check_fonts())'`. Test generování vyžaduje placené API; nejdřív zkontrolujte náhled.
+
+**Ponechat `FB_AUTO_PUBLISH=0`, dokud neověříme živý plakát.**

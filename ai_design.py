@@ -119,109 +119,178 @@ def create_background(name, info=None):
         return img.resize(SIZE, Image.Resampling.LANCZOS)
 
 
-def _font(sz, serif=False):
-    base='/usr/share/fonts/truetype/dejavu/'
-    path=base + ('DejaVuSerifCondensed-Bold.ttf' if serif else 'DejaVuSansCondensed-Bold.ttf')
-    try: return ImageFont.truetype(path, sz)
-    except OSError: return ImageFont.load_default()
+def _font(size, kind='serif'):
+    """Load a REAL scalable Czech-capable font; never silently use bitmap defaults.
+
+    Previous builds swallowed missing TTFs and rendered a 1080px ad in tiny 10px
+    bitmap letters. That must fail closed, especially for automatic publishing.
+    fonts-dejavu-core/extra are installed at BUILD time by nixpacks.toml.
+    """
+    from functools import lru_cache
+    return _font_cached(int(size), kind)
+
+
+@__import__('functools').lru_cache(maxsize=128)
+def _font_cached(size, kind):
+    files = {
+        'serif': ('DejaVuSerifCondensed-Bold.ttf', 'DejaVuSerif-Bold.ttf'),
+        'sans': ('DejaVuSansCondensed-Bold.ttf', 'DejaVuSans-Bold.ttf'),
+        'italic': ('DejaVuSerifCondensed-BoldItalic.ttf', 'DejaVuSerif-BoldItalic.ttf', 'DejaVuSerif-Bold.ttf'),
+    }
+    candidates = files.get(kind, files['serif'])
+    dirs = [Path('/usr/share/fonts/truetype/dejavu'),
+            Path('/usr/local/share/fonts'), Path('/usr/share/fonts/truetype'),
+            Path('/root/.nix-profile/share/fonts/truetype/dejavu'),
+            Path('/root/.nix-profile/share/fonts')]
+    explicit = os.getenv('AI_FONT_DIR', '').strip()
+    if explicit:
+        dirs.insert(0, Path(explicit))
+    for filename in candidates:
+        for d in dirs:
+            direct = d / filename
+            if direct.is_file():
+                return ImageFont.truetype(str(direct), size)
+            # Also handles distributions that nest fonts one level deeper.
+            if d.is_dir():
+                for path in d.glob('*/' + filename):
+                    return ImageFont.truetype(str(path), size)
+        try:
+            # FreeType can find fonts by filename on some systems.
+            return ImageFont.truetype(filename, size)
+        except OSError:
+            pass
+    raise RuntimeError(
+        'Chybi TrueType pisma pro grafiku. V Railway je nutne nainstalovat '
+        'fonts-dejavu-core a fonts-dejavu-extra (viz nixpacks.toml); '
+        'grafiku nelze publikovat s miniaturnim nahradnim fontem.'
+    )
+
+
+def check_fonts():
+    """Raise early when the deployment is missing the required Czech font files."""
+    for kind in ('serif', 'sans', 'italic'):
+        font = _font(54, kind)
+        if font.getbbox('PIVOVAR MAZÁK – 55 Kč')[2] < 120:
+            raise RuntimeError('The typography is not a scalable font')
+    return True
+
+
+def _split_title(text, draw, max_width, max_lines=3):
+    """Fit long names to a bounded area, without truncating user content."""
+    words = text.split()
+    for size in (118, 112, 106, 100, 94, 88, 82, 76, 70, 64, 58, 52, 46):
+        f = _font(size, 'serif')
+        lines = []
+        current = ''
+        for word in words:
+            trial = (current + ' ' + word).strip()
+            if current and draw.textbbox((0, 0), trial, font=f)[2] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = trial
+        if current:
+            lines.append(current)
+        if len(lines) <= max_lines and all(
+                draw.textbbox((0, 0), line, font=f)[2] <= max_width for line in lines):
+            return lines, f
+    raise ValueError('Beer name too long for mobile-readable graphic')
 
 
 def compose(background, change, info=None):
-    """Premium craft-beer art direction, with verified text and original logo.
-
-    Unlike a generic infographic, this layout uses an editorial oversized title,
-    restrained brush strokes, one price seal and cinematic photography.
-    """
-    name=str(change['new']).strip()
-    price=int(change['price'])
-    if not name or len(name)>90 or not 1<=price<=1000:
+    """High-impact 4:5 social poster: big typography + cinematic photo + exact logo."""
+    import math
+    import random
+    check_fonts()
+    name = str(change['new']).strip()
+    price = int(change['price'])
+    if not name or len(name) > 90 or not 1 <= price <= 1000:
         raise ValueError('Invalid beer name/price')
-    logo_path=BASE/'assets'/'logo_pohostinstvi.jpg'
+    logo_path = BASE / 'assets' / 'logo_pohostinstvi.jpg'
     if not logo_path.is_file():
         raise FileNotFoundError('Original Pohostinstvi logo missing')
-    im=background.convert('RGBA').resize(SIZE,Image.Resampling.LANCZOS)
-    # Deep editorial light falloff, rather than opaque text cards.
-    shade=Image.new('RGBA',SIZE,(0,0,0,0))
-    px=shade.load()
-    for x in range(1080):
-        left=max(0,1-x/750)
-        for y in range(1350):
-            bottom=max(0,(y-1030)/320)
-            top=max(0,(240-y)/240)
-            alpha=int(min(235,196*left**1.15+108*bottom+50*top))
-            px[x,y]=(11,7,5,alpha)
-    im=Image.alpha_composite(im,shade)
-    d=ImageDraw.Draw(im)
-    cream='#FFF1D8'; gold='#F5C66B'; green='#91A653'; dark='#24160D'
-    def font(size,serif=False,italic=False):
-        if italic: path='/usr/share/fonts/truetype/dejavu/DejaVuSerifCondensed-BoldItalic.ttf'
-        elif serif: path='/usr/share/fonts/truetype/dejavu/DejaVuSerifCondensed-Bold.ttf'
-        else: path='/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf'
-        try: return ImageFont.truetype(path,size)
-        except OSError: return ImageFont.load_default()
-    def fit(text,limit,maxsize,minimum=27,serif=True):
-        for size in range(maxsize,minimum-1,-2):
-            f=font(size,serif=serif)
-            if d.textbbox((0,0),text,font=f)[2]<=limit:return f
-        return font(minimum,serif=serif)
-    # Small organic visual accents and a single strong product headline.
-    d.polygon([(55,134),(293,127),(289,140),(55,148)],fill='#B23A2C')
-    d.text((56,162),'PIVNÍ NOVINKA',font=font(29),fill=gold,stroke_width=1,stroke_fill=dark)
-    # Split trailing beer degree from name, without inventing style or brewery.
-    match=re.match(r'^(.*?)\s+(\d{1,2}°)$',name)
-    beer=(match.group(1) if match else name).upper()
-    degrees=(match.group(2) if match else '')
-    words=beer.split()
-    title_lines=[];current=''
-    for w in words:
-        candidate=(current+' '+w).strip()
-        if current and len(candidate)>14:
-            title_lines.append(current);current=w
-        else:current=candidate
-    if current:title_lines.append(current)
-    title_lines=title_lines[:4]
-    y=278
-    for line in title_lines:
-        f=fit(line,570,112)
-        d.text((51,y+4),line,font=f,fill='#100C09',stroke_width=6,stroke_fill='#100C09')
-        d.text((54,y),line,font=f,fill=cream,stroke_width=1,stroke_fill='#A47C52')
-        y+=min(137,f.size+22)
+    im = background.convert('RGBA').resize(SIZE, Image.Resampling.LANCZOS)
+    W, H = SIZE
+    # Photo remains visible. Gradual dark left edge secures contrast even for
+    # bright beer scenes; lower contrast applied on the right for vivid beer.
+    shade = Image.new('RGBA', SIZE, (0, 0, 0, 0))
+    px = shade.load()
+    for y in range(H):
+        base_bottom = max(0.0, (y - 1090) / 260)
+        for x in range(W):
+            left = max(0.0, (680 - x) / 680)
+            alpha = min(220, round(112 * left ** 0.65 + 70 * base_bottom))
+            px[x, y] = (9, 6, 5, alpha)
+    im = Image.alpha_composite(im, shade)
+    d = ImageDraw.Draw(im)
+    cream, gold, red, green, brown = '#FFF2D9', '#F9CC75', '#B33C2E', '#91A861', '#130A07'
+    def text_at(pos, content, font, fill=cream, stroke=2):
+        d.text(pos, content, font=font, fill=fill, stroke_width=stroke,
+               stroke_fill=brown, anchor='lt')
+    def centered(xy, content, f, fill=cream, stroke=2):
+        d.text(xy, content, font=f, fill=fill, stroke_width=stroke,
+               stroke_fill=brown, anchor='mm')
+    # Subtle irregular painted accents, not rectangles or UI cards.
+    d.polygon([(59,180),(368,173),(365,192),(56,195)], fill=red)
+    text_at((60,120), 'DNES NA ČEPU', _font(49, 'sans'), gold, 3)
+    text_at((63,214), 'PIVNÍ NOVINKA', _font(33, 'sans'), cream, 1)
+
+    # Keep explicit beer degrees separated and prominent; never invent an ABV.
+    match = re.match(r'^(.*?)\s+(\d{1,2}°)$', name)
+    beer = (match.group(1) if match else name).upper()
+    degrees = match.group(2) if match else ''
+    lines, mainfont = _split_title(beer, d, max_width=565, max_lines=3)
+    y = 326
+    for line in lines:
+        text_at((57, y), line, mainfont, cream, 3)
+        y += mainfont.size + 14
     if degrees:
-        d.text((60,y+4),degrees,font=font(103,serif=True,italic=True),fill=gold,
-               stroke_width=2,stroke_fill=dark)
-        y+=135
-    # Supporting details are ONLY explicit Slack data or approved verified research.
-    subtitle=str(change.get('style') or '').strip()[:52]
-    if subtitle:
-        f=fit(subtitle.upper(),490,36,22,serif=False)
-        d.text((61,y+14),subtitle.upper(),font=f,fill=gold)
-        y+=68
-    brewery=str(change.get('brewery') or '').strip()[:55]
-    if brewery:
-        f=fit(brewery.upper(),500,28,19,serif=False)
-        d.text((61,y+12),brewery.upper(),font=f,fill=cream)
-    # Editorial hand-drawn underline.
-    d.polygon([(59,795),(481,786),(470,794),(63,802)],fill=green)
-    # Price seal, in the bottom-right of the glass rather than a large text block.
-    cx,cy=890,990;rad=150
-    d.ellipse((cx-rad+7,cy-rad+8,cx+rad+7,cy+rad+8),fill=(12,9,6,190))
-    d.ellipse((cx-rad,cy-rad,cx+rad,cy+rad),fill='#173C2C',outline=gold,width=7)
-    d.arc((cx-rad+14,cy-rad+14,cx+rad-14,cy+rad-14),15,160,fill=green,width=5)
-    value=f'{price} Kč'
-    f=fit(value,260,78,40,serif=True)
-    bbox=d.textbbox((0,0),value,font=f)
-    d.text((cx-(bbox[2]-bbox[0])/2,cy-(bbox[3]-bbox[1])/2-13),value,
-           font=f,fill=cream,stroke_width=1,stroke_fill=dark)
-    # Organic bottom CTA, no grid or boxed footer.
-    d.polygon([(55,1225),(610,1206),(600,1215),(55,1238)],fill=green)
-    d.text((57,1118),'Dnes na čepu!',font=font(66,serif=True,italic=True),fill=cream,
-           stroke_width=2,stroke_fill=dark)
-    # Paste the EXACT supplied logo (unaltered artwork, original aspect ratio).
-    with Image.open(logo_path) as logo:
-        logo=logo.convert('RGB').resize((186,186),Image.Resampling.LANCZOS)
-    mask=Image.new('L',(186,186),0)
-    ImageDraw.Draw(mask).ellipse((0,0,185,185),fill=255)
-    im.paste(logo,(840,35),mask)
+        y += 14
+        text_at((70, y), degrees, _font(112, 'italic'), gold, 3)
+        y += 127
+    # Optional only when this information was explicitly supplied by Slack/user.
+    style = str(change.get('style') or '').strip()[:52]
+    brewery = str(change.get('brewery') or '').strip()[:55]
+    for optional in (style, brewery):
+        if optional and y < 760:
+            f = _font(34, 'sans')
+            while d.textbbox((0,0), optional.upper(), font=f)[2] > 550 and f.size > 25:
+                f = _font(f.size - 1, 'sans')
+            text_at((65,y+9), optional.upper(), f, gold, 1)
+            y += f.size + 27
+    # Small green marker below title, but never across the beer glass.
+    underline_y = max(745, min(810, y + 30))
+    d.polygon([(60,underline_y),(405,underline_y-8),
+               (395,underline_y+4),(67,underline_y+13)],fill=green)
+
+    # The 55 Kč price needs to be readable on a phone. Matte dark green seal.
+    cx, cy, radius = 875, 1020, 155
+    d.ellipse((cx-radius+6,cy-radius+8,cx+radius+6,cy+radius+8),fill=(9,5,2,190))
+    d.ellipse((cx-radius,cy-radius,cx+radius,cy+radius),
+              fill='#183E2D',outline=gold,width=9)
+    d.arc((cx-radius+19,cy-radius+19,cx+radius-19,cy+radius-19),
+          20,155,fill=green,width=5)
+    price_text = f'{price} Kč'
+    price_font = _font(98 if len(price_text) <= 5 else 78, 'serif')
+    # Fit text horizontally without reducing below 55px.
+    while d.textbbox((0,0),price_text,font=price_font)[2] > radius*1.72 and price_font.size>55:
+        price_font=_font(price_font.size-2,'serif')
+    centered((cx,cy-5),price_text,price_font,cream,3)
+
+    # Premium concise footer, visible on all mobile displays.
+    text_at((61,1125),'PŘIJĎTE OCHUTNAT',_font(44,'sans'),gold,2)
+    d.polygon([(63,1201),(590,1187),(580,1200),(63,1215)],fill=green)
+    text_at((61,1240),'STAROJICKÁ LHOTA',_font(35,'serif'),cream,2)
+
+    # The REAL uploaded logo is masked to the circular mark. No AI re-creation.
+    with Image.open(logo_path) as raw_logo:
+        raw_logo=raw_logo.convert('RGB')
+        side=min(raw_logo.size)
+        ox=(raw_logo.width-side)//2; oy=(raw_logo.height-side)//2
+        logo=raw_logo.crop((ox,oy,ox+side,oy+side)).resize((178,178),Image.Resampling.LANCZOS)
+    mask=Image.new('L',(178,178),0)
+    ImageDraw.Draw(mask).ellipse((1,1,176,176),fill=255)
+    im.paste(logo,(842,40),mask)
     out=io.BytesIO()
     im.convert('RGB').save(out,format='PNG',optimize=True)
     return out.getvalue()
