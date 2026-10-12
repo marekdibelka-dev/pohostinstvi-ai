@@ -1,4 +1,30 @@
-# Pohostinství AI 2.0 — prémiové AI plakáty
+# Pohostinství AI 2.1 — bezpečné okraje a lepší výtvarné vedení
+
+**Oprava vůči 2.0:** horní text byl oříznut při převodu OpenAI 1024×1536 (2:3) na Facebook 1080×1350 (4:5). Verze 2.1 **už neořezává žádné pixely zdroje**; celou grafiku proporčně vloží a prostor na krajích doplní rozostřeným atmosférickým pokračováním.
+
+Výtvarné zadání je podstatně konkrétnější: jasně nasvícené zlaté pivo, poctivá hloubka a pubové detaily, velká výrazná krémová typografie, dynamické červeno-zelené štětcové plochy, realistická fotografie a rozpoznatelná série bez generických kartiček.
+
+Další změny:
+- ve zdroji bezpečné odstupy textů od všech čtyř okrajů; žádný uříznutý nápis;
+- druhý model výslovně vrací `edge_text_clipped` a `premium_photo_realism`; když nevyhoví, plakát se **nezveřejní**;
+- originální logo se vždy vkládá až po generování; bez dalšího přidávání vymyšlených údajů;
+- zachovaný automatický provoz se Slackem, časový filtr i stávající proměnné Railway.
+
+**Nenahrává se žádné nové písmo.** Nahrát obsah celého ZIP na GitHub včetně `poster_ai.py` a původních souborů. `FB_AUTO_PUBLISH=0` musí zůstat, než skutečný výstup vizuálně potvrdíme.
+
+Test bez Facebooku v Railway Console (nejdříve `/opt/venv/bin/python`):
+
+```python
+from ai_design import create_poster
+p,info=create_poster({'new':'Mazák 11°','price':55})
+open('/data/test_mazak_v21.png','wb').write(p)
+```
+
+Generování přes OpenAI Images API i závěrečná kontrola využívají placené kredity. **Lokální testy nejsou zárukou stejně kvalitního vzhledu jako grafika přímo v ChatGPT.**
+
+## Podrobnosti
+
+# Pohostinství AI 2.1 — prémiové AI plakáty
 
 **Změna architektury:** Výchozí režim `AI_DESIGN_MODE=full_poster` generuje **celou reklamní grafiku včetně kreativní typografie** pomocí OpenAI Images API. Je to zásadní rozdíl oproti starým verzím, které generovaly jen fotografii a následně kreslily jednoduchou šablonu v Pillow.
 

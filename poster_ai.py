@@ -12,7 +12,7 @@ import os
 import re
 import unicodedata
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from ai_design import _api, _response_text, SIZE, BASE, research_beer
 
 log=logging.getLogger(__name__)
@@ -46,39 +46,58 @@ def _copy(change):
 
 
 def _make_prompt(name,price,extras,info):
-    # Research may suggest color or props but cannot add numerical/factual copy.
-    tint=(info.get('color') or 'golden amber unless a named beer style implies otherwise')[:90]
-    props=(info.get('visual_motifs') or 'green hops, golden barley, old Czech pub')[:130]
+    """Premium Czech ad art direction with hard source-canvas safe margins.
+
+    The API makes a 1024x1536 image, while Facebook needs 1080x1350.
+    Final processing FITS the full 2:3 source to 4:5; it must never crop text.
+    """
+    tint=(info.get('color') or 'bright natural golden to amber, not unnaturally brown')[:90]
+    motifs=(info.get('visual_motifs') or 'realistic hops, golden barley, old Czech pub')[:130]
     required=['DNES NA ČEPU',name,f'{price} Kč']+extras
-    return (f'Art-direct and FINISH a polished premium vertical Czech craft beer '\
-        f'advertising POSTER, not a plain photo or a digital infographic. '
-        f'The visual feel is a warm photorealistic beverage campaign by an '\
-        f'experienced brewery design studio, with expressive vintage editorial '\
-        f'typography integrated artfully into the scene: distressed cream lettering, '\
-        f'energetic real-paint brick-red and forest-green brush strokes, touches '\
-        f'of warm brass-gold. A single natural delicious Czech beer in a realistic '\
-        f'glowing foamy condensation-covered glass occupies RIGHT half, with '\
-        f'wooden pub bar, hops and barley in the foreground, cinematic amber '\
-        f'tungsten bokeh, high-end believable commercial lighting and strong depth. '\
-        f'Put the LARGE impressive beer name on left with dramatic typographic '\
-        f'hierarchy and legible bold prices on an expressive painted seal at bottom '\
-        f'left. This should visually resemble a beautiful bespoke illustrated '\
-        f'photo advertisement, NOT a UI panel, generic Canva template, or black '\
-        f'background with flat words. Rich balanced details and deliberate '
-        f'negative space. Beer visual color: {tint}. Brewery visual motifs: {props}. '
-        f'Only render the following exact UTF-8 Czech copy in the poster, each '\
-        f'legible and spelled letter-perfect with the exact diacritics: '\
-        f'{json.dumps(required, ensure_ascii=False)}. '
-        f'Use all items, but DO NOT add other words, numbers, percentage, ABV, '\
-        f'IBU, tasting notes, fake labels, fabricated historical details, '\
-        f'fake brewery logos or brand marks. Design the upper-right corner '\
-        f'as a clear clean space for the ORIGINAL venue seal which is composited '\
-        f'later, so do not invent or display any venue logo. '
-        f'Portrait 4:5 SAFE COMPOSITION: source is 2:3 ratio and will be center-cropped '\
-        f'to 4:5. Keep ALL text and essential details entirely within central '\
-        f'83% of image HEIGHT (y=10% to 90%), and allow logo at upper right '\
-        f'within the central region. Detailed expert food photography, no people, '\
-        f'visually arresting but uncluttered, suitable for Facebook and Instagram.')
+    return (
+        'Create a MASTERPIECE of Czech craft beer ADVERTISING ART, as polished as '
+        'the best photographed brewery campaign for a high-end magazine. '
+        'ART DIRECTION: photorealistic, cinematically lit, deep layered tavern '
+        'interior in amber tungsten light, glistening real wooden bar, vivid '
+        'luminous translucent fresh beer (not flat brown liquid), crisp bubbles '
+        'and fine condensation, generous convincing foam. Warm bokeh lanterns '
+        'and softly visible brass beer taps create depth. Fresh emerald green '
+        'hops and golden barley in the foreground, not a flat plain muddy void. '
+        'Bold asymmetrical sophisticated poster: hero beer glass on RIGHT half, '
+        'expressive distressed large cream display serif lettering on LEFT, '
+        'artfully layered dark forest-green and rich vermilion BRUSH STROKES '
+        'under/behind select headlines, cinematic cast shadows, painterly '
+        'textural accents, dramatic luminous reflections. More like real '
+        'high-end commercial photo and handcrafted graphic design together '
+        'than an old flat illustration or infographic. Strong dynamic '
+        'hierarchy: first the beer name; then compelling foaming golden beer; '
+        'then stupňovitost, then expressive big painted red price medallion. '
+        'Carefully balance the bright glass and readable editorial text, '
+        'no huge empty backgrounds, no UI boxes, no hard panel outlines, '
+        'no cheap generic templates. Brand-consistent expressive palette '
+        'of cream, golden straw, dark walnut, forest green and brick-red. '
+        'The model must create the ENTIRE premium poster, including gorgeous '
+        'art-directed distressed Czech typography, not a photo template. '
+        f'Beer visual color direction: {tint}. Accents: {motifs}. '
+        f'The ONLY words/numbers permitted anywhere: {json.dumps(required,ensure_ascii=False)}. '
+        'Render EXACTLY this Czech text with letter-perfect diacritics. '
+        'DO NOT add any extra words, numeric claims, ABV, IBU, brewery marks, '
+        'locations, historic claims, false beer labels, watermarks, or logos. '
+        'IMPORTANT SOURCE CANVAS RULES for 1024x1536 portrait: '
+        'Keep the ENTIRE first-line headline at y=11%-22%, NEVER at top edge. '
+        'Main beer title starts at y=29%-46%. Price medallion y=68%-84%. '
+        'All visible letters, strokes, numerals and graphic badges MUST be '
+        'at least 7% INSIDE all 4 edges of the SOURCE canvas. '
+        'This is absolutely nonnegotiable: DO NOT crop any letter at the '
+        'top, bottom, left or right. Include the whole foam cap and glass base. '
+        'Reserve a clean top-right region x=74%-94%, y=12%-29% for '
+        'a circular REAL pub logo added separately (draw no logo yourself). '
+        'Place only text on the left, not across the glass. '
+        'The final image will be fitted whole into a 4:5 social poster '
+        'WITHOUT CROPPING, so design with strong safe margins and legible type. '
+        'Crisp professional advertising photography, not cartoon, '
+        'not brown illustration, no people.'
+    )
 
 
 def _add_exact_logo(im):
@@ -96,6 +115,41 @@ def _add_exact_logo(im):
     return im.convert('RGB')
 
 
+
+def _fit_entire_source_to_4x5(source, final_size=SIZE):
+    """Never delete any edge pixels, unlike v2.0's destructive center-crop.
+
+    A full-height, aspect-ratio-preserved poster sits over a softened, extended
+    version of the source, so the narrower 2:3 generation fills 4:5 safely.
+    """
+    src=source.convert('RGB')
+    w,h=final_size
+    if src.width<=0 or src.height<=0 or w<=0 or h<=0:
+        raise ValueError('Invalid image dimensions')
+    cover=ImageOps.fit(src,final_size,method=Image.Resampling.LANCZOS,centering=(.5,.5))
+    cover=cover.filter(ImageFilter.GaussianBlur(36)).convert('RGBA')
+    veil=Image.new('RGBA',final_size,(19,11,7,65))
+    cover=Image.alpha_composite(cover,veil).convert('RGB')
+    scale=min(w/src.width,h/src.height)
+    fit_w=max(1,round(src.width*scale)); fit_h=max(1,round(src.height*scale))
+    fitted=src.resize((fit_w,fit_h),Image.Resampling.LANCZOS)
+    x=(w-fit_w)//2; y=(h-fit_h)//2
+    if x==0 and y==0:
+        return fitted
+    # Soft fade only the outer 16px of the vertical edges; ALL SOURCE PIXELS
+    # are preserved spatially with no destructive crop.
+    mask=Image.new('L',(fit_w,fit_h),255)
+    fade=min(14,max(0,(w-fit_w)//4))
+    if fade:
+        md=ImageDraw.Draw(mask)
+        for k in range(fade):
+            alpha=int(255*k/fade)
+            md.line((k,0,k,fit_h),fill=alpha,width=1)
+            md.line((fit_w-1-k,0,fit_w-1-k,fit_h),fill=alpha,width=1)
+    cover.paste(fitted,(x,y),mask)
+    return cover
+
+
 def _vision_quality_check(image,name,price,extras):
     """Fail closed when a vision pass cannot confirm required exact visible text.
 
@@ -110,10 +164,12 @@ def _vision_quality_check(image,name,price,extras):
           'Visually transcribe all words and numbers that ACTUALLY appear. '
           'Never supply expected words that are not visible. '
           'Do not silently fix misspellings. Respond as a single JSON object with keys '
-          'visible_text (string), legible (boolean), premium_composition (boolean). '
-          'legible must be false if any headline or price is distorted or tiny. '
-          'premium_composition must be false for generic layouts, obvious deformation, '
-          'fake beer labels or low quality visual work. No markdown.')},
+          'visible_text (string), legible (boolean), premium_composition (boolean), '
+          'edge_text_clipped (boolean), premium_photo_realism (boolean). '
+          'edge_text_clipped MUST be true if ANY part of any letter/number is cut off by '
+          'the image border. premium_composition false for generic layouts, '
+          'premium_photo_realism false for illustration-like beer. '
+          'Reject unreadable, deformed or fake beer labels. No markdown.')},
           {'role':'user','content':[
             {'type':'input_text','text':f'Transcribe and assess the photo poster. The source name and price to CHECK, not assume: {name!r}, {price} Kč. Additional copy: {extras!r}.'},
             {'type':'input_image','image_url':'data:image/jpeg;base64,'+b64,'detail':'high'}]}],
@@ -124,7 +180,8 @@ def _vision_quality_check(image,name,price,extras):
         raw=re.sub(r'^```(?:json)?\s*|\s*```$','',raw)
     try: data=json.loads(raw)
     except (ValueError,TypeError) as exc: raise RuntimeError('Poster proofreading did not return valid JSON') from exc
-    if data.get('legible') is not True or data.get('premium_composition') is not True:
+    if (data.get('legible') is not True or data.get('premium_composition') is not True
+            or data.get('premium_photo_realism') is not True or data.get('edge_text_clipped') is not False):
         raise RuntimeError('Poster design or typographic legibility failed independent image review')
     seen=_strip(data.get('visible_text',''))
     for item in ['DNES NA ČEPU',name,str(price),'Kč',*extras]:
@@ -158,10 +215,10 @@ def create_full_poster(change):
     with Image.open(io.BytesIO(raw)) as generated:
         im=generated.convert('RGB')
         w,h=im.size
-        # Crop central 4:5 poster from 2:3 source, then resize to final exact pixel size.
-        new_h=min(h,round(w*5/4))
-        top=max(0,(h-new_h)//2)
-        im=im.crop((0,top,w,top+new_h)).resize(SIZE,Image.Resampling.LANCZOS)
+        # Non-destructive 2:3 -> 4:5 layout; source artwork is NEVER cropped.
+        # The former center-crop removed 128 original pixels from both ends,
+        # clipping the 'DNES NA ČEPU' headline despite the QA pass.
+        im=_fit_entire_source_to_4x5(im)
         im=_add_exact_logo(im)
         _vision_quality_check(im,name,price,extra)
         buf=io.BytesIO();im.save(buf,format='PNG',optimize=True)
