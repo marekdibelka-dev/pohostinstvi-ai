@@ -151,7 +151,7 @@ def process_change(channel, thread_ts, event_id, message, received_at):
     if not facebook.publishing_configured():
         return slack_reply(channel, thread_ts,
             "*Facebook – testovací náhled*\n" + facebook.caption(change) +
-            "\n\nAutomatické zveřejnění není zatím aktivní; chybí Meta přístup nebo nastavení.")
+            "\n\nAutomatické zveřejnění není zatím aktivní; zkontroluj FB_AUTO_PUBLISH, Meta token, OPENAI_API_KEY a FB_DB_PATH.")
     db = os.environ['FB_DB_PATH']
     try:
         if not facebook.claim_event(event_id, db):
@@ -233,7 +233,7 @@ def handle_event(body: bytes, headers: dict):
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            self.respond(200, {"status": "ok", "mode": "facebook-enabled" if facebook.publishing_configured() else "preview-only", "version": "1.4"})
+            self.respond(200, {"status": "ok", "mode": "facebook-enabled" if facebook.publishing_configured() else "preview-only", "version": "1.7"})
         else:
             self.respond(404, {"error": "Not found"})
 

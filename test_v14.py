@@ -54,7 +54,7 @@ class FacebookTests(unittest.TestCase):
     def test_inside_window_publish_once(self):
         with tempfile.TemporaryDirectory() as folder:
             env={'FB_AUTO_PUBLISH':'1','FB_PAGE_ID':'1234','FB_PAGE_ACCESS_TOKEN':'test',
-                 'FB_DB_PATH':os.path.join(folder,'fb.db')}
+                 'FB_DB_PATH':os.path.join(folder,'fb.db'),'OPENAI_API_KEY':'fake-test-key'}
             with patch.dict(os.environ,env), patch('app.slack_reply') as reply, patch('facebook.post_photo',return_value='post-1') as post, patch('app.facebook.allowed_at',return_value=True):
                 args=('chan','123','evt-3','Vyměň Kazbek za Mazák, cena 55 Kč',moment(2026,10,9,18))
                 app.process_change(*args)
