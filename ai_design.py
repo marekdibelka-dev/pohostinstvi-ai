@@ -83,22 +83,35 @@ def create_background(name, info=None):
     name = str(name).strip()[:90]
     color = info.get('color') or 'natural golden amber, adjust to the named beer only if certain'
     motifs = info.get('visual_motifs') or 'fresh hops, subtle barley, atmospheric Czech pub'
+    # Scene art direction differs per beer; the marketing style remains constant.
+    # Do not request a flat empty photo: give the model a designed, layered ad scene.
     prompt = (
-        'Premium photorealistic editorial commercial beer photograph for a cohesive '
-        'Czech craft beer pub campaign. VERTICAL portrait 4:5 composition. '
-        'A single beautiful natural beer glass with correct realistic proportions, '
-        'condensation and authentic foam, sitting on an aged wooden bar. '
-        'Dominant beer glass occupies the RIGHT HALF, mainly x=55%-95%, from '
-        'y=20%-90%. LEFT HALF and TOP 15% remain very dark and spacious for '
-        'a separate typesetting overlay. Deep cinematic shadows, rich warm tungsten '
-        'bokeh, precise professional studio lighting, premium beverage advertising, '
-        'subtle textured depth, sophisticated muted gold and copper accents, '
-        'very realistic foam and reflections, no illustration, no collage, no UI. '
-        f'Beer color direction: {color}. Supporting visual details: {motifs}. '
-        'This is an unbranded art background, not a product label. '
-        'ABSOLUTELY NO WORDS, LETTERS, NUMBERS, TYPOGRAPHY, TEXT, LABELS, '
-        'WATERMARKS, SIGNAGE, BRAND MARKS, GRAPHIC LOGOS OR PRICE TAGS ANYWHERE. '
-        'No human figures. Keep visual continuity with a high-end Czech pub series.'
+        'Create a cinematic, deeply art-directed Czech craft-beer advertisement '
+        'PHOTOGRAPHIC BACKGROUND ONLY, vertical 4:5. Build an immersive, richly '
+        'composed atmosphere rather than a giant isolated mug on a black backdrop. '
+        'Premium brewery campaign, expressive warm amber-gold tungsten spotlights, '
+        'deep espresso shadows, cherry-red and bottle-green accent reflections, '
+        'beautiful glossy reclaimed wooden bar, shallow depth of field, vintage '
+        'bar fixtures and glowing lantern bokeh. Realistically foaming gorgeous '
+        'beer in a clean correctly proportioned transparent glass with natural '
+        'condensation, fascinating golden light shining through beer and microbubbles. '
+        'Glass appears on RIGHT side of frame, around x=65%-86%, from y=27%-80%; '
+        'do not crop the lip or glass base. Visible craft hops and golden barley '
+        'in low foreground, small botanicals, subtle atmospheric haze, rich tactile '
+        'textures. Upper-left quadrant has a warm textured dark wooden/chalkboard '
+        'backdrop for custom lettering overlay; keep strong lamp-glow visible '
+        'behind the scene rather than uniform pitch black. Bottom-left has enough '
+        'organic dark bar material for a dynamic red price splash overlaid later. '
+        'Clear contiguous region x=4%-50%, y=22%-67% for separate Czech title '
+        'and beer attributes, without a box or a hard dividing line. '
+        'Style: award-winning advertising photography, art-directed cinematography, '
+        'tactile old-world Czech pub atmosphere, painterly but realistic, sparkling '
+        'fresh beer, sophisticated high contrast, deliberately layered composition. '
+        f'Beer color direction: {color}. Supporting props: {motifs}. '
+        'This is an IMAGE LAYER behind independently typeset advertisement copy. '
+        'Do not render any words, letters, numbers, logos, beer brand marks, '
+        'labels, signs, watermarks, price tags or typographic elements anywhere. '
+        'No people, no illustrations, no isolated product catalogue shot.'
     )
     r = _api('images/generations', {
         'model': os.getenv('AI_IMAGE_MODEL', 'gpt-image-1'),
@@ -197,106 +210,186 @@ def _split_title(text, draw, max_width, max_lines=3):
     raise ValueError('Beer name too long for mobile-readable graphic')
 
 
-def compose(background, change, info=None):
-    """High-impact 4:5 social poster: big typography + cinematic photo + exact logo."""
-    import math
+def _brush(draw, xy, fill, seed=0, strands=25, rough=11):
+    """Hand-torn painted strip: rough, discontinuous edges, tapered ends."""
     import random
+    x1,y1,x2,y2=map(int,xy)
+    rng=random.Random(seed)
+    top=[];bottom=[]
+    n=27
+    for i in range(n+1):
+        x=x1+(x2-x1)*i/n
+        tip=min(1.0, i/3, (n-i)/3)
+        top.append((int(x),int(y1+(1-tip)*(y2-y1)*.35+rng.randint(-rough,rough))))
+        bottom.append((int(x),int(y2-(1-tip)*(y2-y1)*.25+rng.randint(-rough,rough))))
+    draw.polygon(top+list(reversed(bottom)), fill=fill)
+    for _ in range(strands):
+        x=rng.randint(x1,x2)
+        y=rng.randint(y1,y2)
+        lx=rng.randint(10,90)
+        if rng.random()<.72:
+            draw.line((x,y,x+lx,y+rng.randint(-3,3)),fill=fill,width=rng.randint(1,3))
+
+
+def _fit(draw, text, max_width, start=100, minimum=43, font_kind='serif'):
+    for size in range(start,minimum-1,-2):
+        f=_font(size,font_kind)
+        box=draw.textbbox((0,0),text,font=f,stroke_width=2)
+        if box[2]-box[0]<=max_width:
+            return f
+    return None
+
+
+def _wrap_title(draw, name, max_width=520):
+    words=name.upper().split()
+    for size in range(140,47,-3):
+        font=_font(size, 'serif')
+        lines=[]; line=''
+        for word in words:
+            trial=(line+' '+word).strip()
+            if line and draw.textbbox((0,0),trial,font=font)[2]>max_width:
+                lines.append(line);line=word
+            else:
+                line=trial
+        if line: lines.append(line)
+        if len(lines)<=3 and all(draw.textbbox((0,0),x,font=font)[2]<=max_width for x in lines):
+            if len(lines)*(size+11)<=375:
+                return lines,font
+    raise ValueError('Beer name too long for a legible poster')
+
+
+def compose(background, change, info=None):
+    """Premium poster composition: expressive hierarchy, exact typography + logo."""
+    import random, hashlib
     check_fonts()
-    name = str(change['new']).strip()
-    price = int(change['price'])
-    if not name or len(name) > 90 or not 1 <= price <= 1000:
+    name=str(change['new']).strip()
+    price=int(change['price'])
+    if not name or len(name)>90 or not 1<=price<=1000:
         raise ValueError('Invalid beer name/price')
-    logo_path = BASE / 'assets' / 'logo_pohostinstvi.jpg'
+    logo_path=BASE/'assets'/'logo_pohostinstvi.jpg'
     if not logo_path.is_file():
         raise FileNotFoundError('Original Pohostinstvi logo missing')
-    im = background.convert('RGBA').resize(SIZE, Image.Resampling.LANCZOS)
-    W, H = SIZE
-    # Photo remains visible. Gradual dark left edge secures contrast even for
-    # bright beer scenes; lower contrast applied on the right for vivid beer.
-    shade = Image.new('RGBA', SIZE, (0, 0, 0, 0))
-    px = shade.load()
+    W,H=SIZE
+    im=background.convert('RGBA').resize(SIZE,Image.Resampling.LANCZOS)
+    # Feathered editorial vignette: don't mask the photographic atmosphere.
+    shade=Image.new('RGBA',SIZE,(0,0,0,0))
+    px=shade.load()
     for y in range(H):
-        base_bottom = max(0.0, (y - 1090) / 260)
         for x in range(W):
-            left = max(0.0, (680 - x) / 680)
-            alpha = min(220, round(112 * left ** 0.65 + 70 * base_bottom))
-            px[x, y] = (9, 6, 5, alpha)
-    im = Image.alpha_composite(im, shade)
-    d = ImageDraw.Draw(im)
-    cream, gold, red, green, brown = '#FFF2D9', '#F9CC75', '#B33C2E', '#91A861', '#130A07'
-    def text_at(pos, content, font, fill=cream, stroke=2):
-        d.text(pos, content, font=font, fill=fill, stroke_width=stroke,
-               stroke_fill=brown, anchor='lt')
-    def centered(xy, content, f, fill=cream, stroke=2):
-        d.text(xy, content, font=f, fill=fill, stroke_width=stroke,
-               stroke_fill=brown, anchor='mm')
-    # Subtle irregular painted accents, not rectangles or UI cards.
-    d.polygon([(59,180),(368,173),(365,192),(56,195)], fill=red)
-    text_at((60,120), 'DNES NA ČEPU', _font(49, 'sans'), gold, 3)
-    text_at((63,214), 'PIVNÍ NOVINKA', _font(33, 'sans'), cream, 1)
+            left=max(0,(590-x)/590)
+            bottom=max(0,(y-1110)/240)
+            px[x,y]=(9,5,3,min(190,int(88*left**.7+38*bottom)))
+    im=Image.alpha_composite(im,shade)
 
-    # Keep explicit beer degrees separated and prominent; never invent an ABV.
-    match = re.match(r'^(.*?)\s+(\d{1,2}°)$', name)
-    beer = (match.group(1) if match else name).upper()
-    degrees = match.group(2) if match else ''
-    lines, mainfont = _split_title(beer, d, max_width=565, max_lines=3)
-    y = 326
+    overlay=Image.new('RGBA',SIZE,(0,0,0,0))
+    d=ImageDraw.Draw(overlay)
+    # Identifiable dark green / vermilion painted headline banner.
+    _brush(d,(45,57,694,210),(11,67,42,242),seed=73,strands=80,rough=9)
+    _brush(d,(43,201,644,228),(188,40,25,242),seed=102,strands=40,rough=6)
+    # A compact gold line before the type, optional ornaments echo hand-crafted posters.
+    _brush(d,(58,306,427,313),(243,180,67,191),seed=221,strands=8,rough=3)
+    im=Image.alpha_composite(im,overlay)
+    d=ImageDraw.Draw(im)
+    cream='#FFF5E2'; gold='#FFC456'; shadow='#1B0A05'; green='#3D7C4B'
+    def draw_text(xy, txt, font, color=cream, stroke=1, shadow_px=3):
+        # Small offset shadow anchors type to photography, not flat UI boxes.
+        x,y=xy
+        d.text((x+shadow_px,y+shadow_px),txt,font=font,anchor='lt',fill=(10,3,1,190),stroke_width=2,stroke_fill=(10,3,1,180))
+        d.text((x,y),txt,font=font,anchor='lt',fill=color,stroke_width=stroke,stroke_fill=shadow)
+
+    f=_fit(d,'DNES NA ČEPU',568,start=71,minimum=50,font_kind='sans')
+    draw_text((67,97),'DNES NA ČEPU',f,cream,1,2)
+    draw_text((70,273),'ČERSTVĚ NARAŽENO',_font(31,'sans'),gold,1,2)
+
+    # Independent logo, cropped and composited. AI cannot alter the brand mark.
+    with Image.open(logo_path) as raw:
+        raw=raw.convert('RGB')
+        side=min(raw.size)
+        logo=raw.crop(((raw.width-side)//2,(raw.height-side)//2,
+                       (raw.width+side)//2,(raw.height+side)//2)).resize((193,193),Image.Resampling.LANCZOS)
+    mask=Image.new('L',logo.size,0)
+    ImageDraw.Draw(mask).ellipse((1,1,191,191),fill=255)
+    # Frame shadow behind logo
+    d.ellipse((827,54,1033,260),fill=(8,4,2,110))
+    im.paste(logo,(833,57),mask)
+    d=ImageDraw.Draw(im)
+
+    # Treat a trailing 11° as visually separate designation. Do not invent facts.
+    m=re.match(r'^(.*?)\s+(\d{1,2}°)$',name)
+    title=(m.group(1) if m else name).strip().upper()
+    deg=m.group(2) if m else ''
+    lines, title_font=_wrap_title(d,title,max_width=520)
+    y=365
     for line in lines:
-        text_at((57, y), line, mainfont, cream, 3)
-        y += mainfont.size + 14
-    if degrees:
-        y += 14
-        text_at((70, y), degrees, _font(112, 'italic'), gold, 3)
-        y += 127
-    # Optional only when this information was explicitly supplied by Slack/user.
-    style = str(change.get('style') or '').strip()[:52]
-    brewery = str(change.get('brewery') or '').strip()[:55]
-    for optional in (style, brewery):
-        if optional and y < 760:
-            f = _font(34, 'sans')
-            while d.textbbox((0,0), optional.upper(), font=f)[2] > 550 and f.size > 25:
-                f = _font(f.size - 1, 'sans')
-            text_at((65,y+9), optional.upper(), f, gold, 1)
-            y += f.size + 27
-    # Small green marker below title, but never across the beer glass.
-    underline_y = max(745, min(810, y + 30))
-    d.polygon([(60,underline_y),(405,underline_y-8),
-               (395,underline_y+4),(67,underline_y+13)],fill=green)
+        draw_text((57,y),line,title_font,cream,2,4)
+        y+=title_font.size+10
+    y+=10
+    if deg:
+        df=_font(169 if len(lines)==1 else 137,'italic')
+        draw_text((57,y),deg,df,gold,1,3)
+        y+= (190 if len(lines)==1 else 158)
+    # Print only user-supplied style and brewery. AI search cannot silently become copy.
+    style=str(change.get('style') or '').strip()
+    brewery=str(change.get('brewery') or '').strip()
+    for v in (style,brewery):
+        if v:
+            ff=_fit(d,v.upper(),510,start=38,minimum=25,font_kind='sans')
+            if ff is None or y>875: raise ValueError('Too much optional copy for readable poster')
+            draw_text((65,y),v.upper(),ff,gold,1,2)
+            y+=ff.size+20
+    # Gold distressed underline with green kick, positioned under the title.
+    bar_y=max(765,min(892,y+14))
+    acc=Image.new('RGBA',SIZE,(0,0,0,0)); ad=ImageDraw.Draw(acc)
+    _brush(ad,(57,bar_y,463,bar_y+14),(39,118,61,240),seed=909,strands=33,rough=3)
+    im=Image.alpha_composite(im,acc)
+    d=ImageDraw.Draw(im)
 
-    # The 55 Kč price needs to be readable on a phone. Matte dark green seal.
-    cx, cy, radius = 875, 1020, 155
-    d.ellipse((cx-radius+6,cy-radius+8,cx+radius+6,cy+radius+8),fill=(9,5,2,190))
-    d.ellipse((cx-radius,cy-radius,cx+radius,cy+radius),
-              fill='#183E2D',outline=gold,width=9)
-    d.arc((cx-radius+19,cy-radius+19,cx+radius-19,cy+radius-19),
-          20,155,fill=green,width=5)
-    price_text = f'{price} Kč'
-    price_font = _font(98 if len(price_text) <= 5 else 78, 'serif')
-    # Fit text horizontally without reducing below 55px.
-    while d.textbbox((0,0),price_text,font=price_font)[2] > radius*1.72 and price_font.size>55:
-        price_font=_font(price_font.size-2,'serif')
-    centered((cx,cy-5),price_text,price_font,cream,3)
+    # Hand-inked price splash bottom-left. Avoid the generic green coupon circle.
+    cx,cy=237,1071
+    badge=Image.new('RGBA',SIZE,(0,0,0,0)); bd=ImageDraw.Draw(badge)
+    rng=random.Random(int(hashlib.sha256(name.encode()).hexdigest()[:8],16))
+    import math
+    def ring(r,n=70,j=0):
+        return [(int(cx+math.cos(2*math.pi*i/n)*(r+rng.randint(-j,j))),
+                 int(cy+math.sin(2*math.pi*i/n)*(r+rng.randint(-j,j)))) for i in range(n)]
+    bd.polygon(ring(160,j=15),fill=(128,16,12,245))
+    bd.line(ring(160,j=9)+ring(160,j=9)[:1],fill=(240,126,61,130),width=5,joint='curve')
+    bd.polygon(ring(140,j=6),fill=(159,23,18,250))
+    for _ in range(65):
+        xx=rng.randint(72,391); yy=rng.randint(911,1232)
+        if (xx-cx)**2+(yy-cy)**2 < 158**2:
+            bd.line((xx,yy,xx+rng.randint(2,23),yy),fill=(108,13,10,90),width=1)
+    im=Image.alpha_composite(im,badge)
+    d=ImageDraw.Draw(im)
+    price_font=_fit(d,str(price),275,start=160,minimum=80,font_kind='sans')
+    d.text((cx,cy-29),str(price),font=price_font,anchor='mm',fill=cream,
+           stroke_width=2,stroke_fill=shadow)
+    d.text((cx+48,cy+73),'Kč',font=_font(58,'italic'),anchor='mm',fill=gold,
+           stroke_width=1,stroke_fill=shadow)
 
-    # Premium concise footer, visible on all mobile displays.
-    text_at((61,1125),'PŘIJĎTE OCHUTNAT',_font(44,'sans'),gold,2)
-    d.polygon([(63,1201),(590,1187),(580,1200),(63,1215)],fill=green)
-    text_at((61,1240),'STAROJICKÁ LHOTA',_font(35,'serif'),cream,2)
+    # Quiet footer integrated into the photographed bar; not a rectangular card.
+    draw_text((473,1192),'PŘIJĎTE OCHUTNAT!',_font(37,'italic'),cream,1,3)
+    _brush_layer=Image.new('RGBA',SIZE,(0,0,0,0))
+    ad=ImageDraw.Draw(_brush_layer)
+    _brush(ad,(477,1252,970,1262),(41,116,59,225),seed=444,strands=40,rough=4)
+    im=Image.alpha_composite(im,_brush_layer)
 
-    # The REAL uploaded logo is masked to the circular mark. No AI re-creation.
-    with Image.open(logo_path) as raw_logo:
-        raw_logo=raw_logo.convert('RGB')
-        side=min(raw_logo.size)
-        ox=(raw_logo.width-side)//2; oy=(raw_logo.height-side)//2
-        logo=raw_logo.crop((ox,oy,ox+side,oy+side)).resize((178,178),Image.Resampling.LANCZOS)
-    mask=Image.new('L',(178,178),0)
-    ImageDraw.Draw(mask).ellipse((1,1,176,176),fill=255)
-    im.paste(logo,(842,40),mask)
-    out=io.BytesIO()
-    im.convert('RGB').save(out,format='PNG',optimize=True)
-    return out.getvalue()
+    buf=io.BytesIO()
+    im.convert('RGB').save(buf,format='PNG',optimize=True)
+    return buf.getvalue()
 
 def create_poster(change):
-    """Return (png, verified_research_context). AI required, no stock fallback."""
-    info=research_beer(str(change['new']))
-    bg=create_background(change['new'],info)
-    return compose(bg,change,info),info
+    """Use creative full poster mode by default, conservative fail-closed QA.
+
+    Previous photo+Pillow layout remains as an explicit experimental hybrid mode.
+    Never fall back silently: bad generated typography must not be posted.
+    """
+    mode=os.getenv('AI_DESIGN_MODE','full_poster').strip().lower()
+    if mode=='full_poster':
+        from poster_ai import create_full_poster
+        return create_full_poster(change)
+    if mode=='hybrid':
+        info=research_beer(str(change['new']))
+        bg=create_background(change['new'],info)
+        return compose(bg,change,info),info
+    raise ValueError('AI_DESIGN_MODE must be full_poster or hybrid')

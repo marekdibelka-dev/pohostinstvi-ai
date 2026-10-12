@@ -1,47 +1,37 @@
-# Pohostinství AI Cloud v1.8 – prémiová AI grafika
+# Pohostinství AI 2.0 — prémiové AI plakáty
 
-## Oprava náhledu podle MASTER PROMPTU
+**Změna architektury:** Výchozí režim `AI_DESIGN_MODE=full_poster` generuje **celou reklamní grafiku včetně kreativní typografie** pomocí OpenAI Images API. Je to zásadní rozdíl oproti starým verzím, které generovaly jen fotografii a následně kreslily jednoduchou šablonu v Pillow.
 
-Soubor `preview/Pohostinstvi_AI_v1_8_OPRAVENY_NAHLED.png` ukazuje schválený **filmový reklamní styl** (nejde o starý šablonový náhled). Jde o výtvarnou referenci; samotný generátor produkuje vždy novou AI scénu a skládá do ní správné názvy, ceny a originální logo. V referenčním obrázku mohou být AI doplněné popisné detaily; neslouží jako podklad pro tvrzení o parametrech piva.
+Pohostinství AI pak vloží **originální logo** ze souboru `assets/logo_pohostinstvi.jpg` a provede **nezávislou kontrolu** plakátu pomocí obrazového modelu. Kontroluje alespoň existenci a čitelnost názvu piva, ceny, nadpisu, nežádoucí číselné údaje a základní vizuální kvalitu. Při nesrovnalosti **nezveřejňuje**, ale vrátí chybu. Automatická kontrola však není zárukou 100% bezchybnosti; před produkčním provozem nutné vizuální testování několika reálných plakátů.
 
-## Změna oproti v1.6
+## Grafický standard
+- 1080 × 1350 px, tmavá teplá filmová atmosféra, originální čepované pivo, texturované pozadí a propracovaná kompozice
+- výrazná typografie, ručně působící červené a zelené tahy, skutečné pivovarské reklamní výtvarno
+- AI dostává pouze název, stupňovitost a cenu od obsluhy; jiné neověřené hodnoty (IBU, ABV aj.) nesmí generovat
+- Originální logo nikdy nevytváří AI; vloží se přesně ze souboru
 
-Každá nová zpráva o výměně piva ve Slacku vyvolá **novou AI fotografickou scénu** pro konkrétní pivo. Vizuální identita je stálá: tmavé hospodské prostředí, teplé nasvícení, sklenice vpravo, typografie vlevo, teplé zlaté a červené akcenty a originální logo Pohostinství Starojická Lhota.
+## Railway
+Nahrát **obsah rozbaleného ZIPu** do GitHub repozitáře ve větvi `main`, včetně nového `poster_ai.py` a původní složky `assets`.
+Proměnné `OPENAI_API_KEY`, `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN`, `FB_DB_PATH` ponechat; `FB_AUTO_PUBLISH=0` ponechat do otestování. Nová volitelná proměnná `AI_DESIGN_MODE=full_poster` je výchozí, takže ji není nutné zakládat. `AI_IMAGE_QUALITY=high` je výchozí a může spotřebovat více kreditu; při potřebě úspor lze snížit na `medium` na úkor kvality. Generování i obrazová kontrola využívají placené API.
 
-- **1080×1350 px (4:5)**; bez chybně vykreslených cen, názvů a loga: ty se přidávají až po generování obrázku, deterministicky přes Pillow.
-- Základní AI průzkum používá OpenAI Responses API s nástrojem `web_search`. Pokud není dohledatelný věrohodný zdroj, neuvádí další faktické parametry. AI průzkum slouží pro vizuální inspiraci; neověřené ABV/IBU se nikdy nepíšou do obrázku ani popisku.
-- Text příspěvku zůstává jednoduchý a používá jen název a cenu ze Slacku. Pivovar a styl z výzkumu nejsou automaticky považovány za ověřené pro veřejný text.
-- **Originální logo** je v `assets/logo_pohostinstvi.jpg`. Nenahrazujte ho AI verzí.
-- AI obrázek je generován bez textu, etiket a log. Přesto je před plným spuštěním potřeba vizuální test, protože model může někdy vytvořit nežádoucí znaky.
-- Při selhání AI nebo chybějícím API klíči se **nic nepublikuje**. Automatické opakování se neprovádí.
+Test bez zveřejnění v Railway Console: spustit `/opt/venv/bin/python`, poté:
 
-## Railway nastavení
+```python
+from ai_design import create_poster
+p, info = create_poster({'new': 'Mazák 11°', 'price': 55})
+open('/data/test_mazak_v20.png', 'wb').write(p)
+```
 
-1. Nahraj všechny soubory z této složky do kořene GitHub repozitáře aplikace (ponech stávající Slack secrets).
-2. Nastav `OPENAI_API_KEY` v Railway Variables. **Klíč nikdy neposílej do chatu ani do GitHubu.** Generování obrázků a webový průzkum mohou být zpoplatněné zvlášť od předplatného ChatGPT.
-3. Ponech `FB_PAGE_ID=849555404896594`, `FB_PAGE_ACCESS_TOKEN` a `FB_AUTO_PUBLISH=0`.
-4. Pro bezpečné deduplikování je nutný Railway Volume připojený na `/data` a `FB_DB_PATH=/data/pohostinstvi_ai.sqlite3`.
-5. Ověř platnost Page tokenu a Meta oprávnění `pages_manage_posts`.
-6. Po kontrolovaném testu publikování a vizuální kontroly teprve přepni `FB_AUTO_PUBLISH=1`.
+> **Pozor:** Náhled `preview/vizualni_koncept.png` pochází z grafického zadání a nástroje generování obrázků v ChatGPT. Není to skutečný výstup ještě neotestovaného režimu `full_poster` v Railway. Ten je nutné ověřit novým testem.
 
-## Ostatní provozní pravidla
+## Co se nemění
+- Soukromý Slack `#piva-na-cepu` a příjem hlášení výměn piv od členů kanálu
+- Čas publikace pouze pá/so 18–21, ne 16–20 (Europe/Prague), mimo čas bez fronty
+- Otevírací doba pá/so 18–22, ne 17–21
+- FB automaticky stále vypnut, dokud neproběhnou živé testy
+- Dotykačka a web stále nejsou automaticky napojené
 
-- Slack kanál `#piva-na-cepu` zůstává soukromý; všichni jeho členové mohou zadat výměnu.
-- Zveřejnění pouze **pátek/sobota 18:00–21:00, neděle 16:00–20:00** (Europe/Prague), mimo okna žádná fronta.
-- Běžná otevírací doba: **pátek/sobota 18:00–22:00, neděle 17:00–21:00**. Časy publikování nejsou totožné s otevírací dobou.
-- Dotykačka, web a Instagram zatím nejsou tímto balíčkem napojené. Výměna produktu v Dotykačce se neprovádí.
-- Automaticky se zpracují pouze zprávy se starým pivem, novým pivem a cenou, které odpovídají stávajícím pravidlům parseru.
-- Facebook automatizace je výchozím nastavením **vypnutá**.
+## Záložní režim
+`AI_DESIGN_MODE=hybrid` ponechává technickou variantu fotografie + programové sazby z předchozích verzí. Automatické přepnutí při chybě **neexistuje** — při selhání je zveřejnění zablokováno.
 
-## Testy
-
-`python -m unittest discover -v`
-
-
-## Důležitá oprava v1.8: nečitelné písmo
-
-V1.7 při chybějícím systémovém TTF používala 10px bitmapové písmo, takže skutečná grafika měla téměř neviditelný text. Nová v1.8 instalací systémových balíků `fonts-dejavu-core`, `fonts-dejavu-extra` v `nixpacks.toml` zajistí škálovatelnou typografii. Pokud by instalační obraz fonty přesto postrádal, `compose` selže s jasným chybovým hlášením a nic se automaticky nezveřejní.
-
-Při uploadu GitHub vlož do kořene repozitáře rovněž **nixpacks.toml**, jinak se fonty nenainstalují. Po nasazení je možné bez nákladů zkontrolovat fonty příkazem: `/opt/venv/bin/python -c 'import ai_design; print(ai_design.check_fonts())'`. Test generování vyžaduje placené API; nejdřív zkontrolujte náhled.
-
-**Ponechat `FB_AUTO_PUBLISH=0`, dokud neověříme živý plakát.**
+Lokální testy: `python -m unittest discover -v`.
